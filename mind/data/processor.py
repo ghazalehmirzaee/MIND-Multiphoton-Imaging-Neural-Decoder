@@ -78,10 +78,38 @@ def create_datasets(calcium_signals: Dict[str, np.ndarray],
                     test_size: float = 0.15,
                     val_size: float = 0.15,
                     random_state: int = 42) -> Dict[str, Dict[str, SlidingWindowDataset]]:
-    """
-    Create train, validation, and test datasets for each signal type.
-    """
+    """Create train, validation, and test datasets for each signal type."""
     logger.info("Creating datasets from calcium signals")
+
+    # DEBUGGING: Check if signals are actually different
+    signal_ids = {}
+    signal_stats = {}
+
+    for signal_name, signal in calcium_signals.items():
+        if signal is not None:
+            signal_ids[signal_name] = id(signal)
+            signal_stats[signal_name] = {
+                'mean': float(np.mean(signal)),
+                'std': float(np.std(signal)),
+                'shape': signal.shape,
+                'first_10_elements': signal.flatten()[:10].tolist()
+            }
+
+    logger.info(f"🔍 SIGNAL IDENTITY CHECK:")
+    for name, sig_id in signal_ids.items():
+        logger.info(f"  {name}: id={sig_id}, mean={signal_stats[name]['mean']:.6f}")
+
+    # Check for identical objects
+    signal_names = list(signal_ids.keys())
+    for i in range(len(signal_names)):
+        for j in range(i + 1, len(signal_names)):
+            name1, name2 = signal_names[i], signal_names[j]
+            if signal_ids[name1] == signal_ids[name2]:
+                logger.error(f"🚨 IDENTICAL OBJECTS: {name1} and {name2} share the same memory!")
+            elif np.array_equal(calcium_signals[name1], calcium_signals[name2]):
+                logger.error(f"🚨 IDENTICAL ARRAYS: {name1} and {name2} have identical values!")
+            else:
+                logger.info(f"✓ DIFFERENT: {name1} and {name2} are properly different")
 
     # Create dataset dictionary
     datasets = {}
@@ -94,43 +122,104 @@ def create_datasets(calcium_signals: Dict[str, np.ndarray],
 
         logger.info(f"Processing {signal_name}")
 
-        # Create windows for the entire dataset
-        full_dataset = SlidingWindowDataset(signal, frame_labels,
+        # DEBUGGING: Create a TRUE copy to ensure independence
+        signal_copy = signal.copy()  # Force a deep copy
+
+        logger.info(f"🔍 COPY CHECK for {signal_name}:")
+        logger.info(f"  Original id: {id(signal)}")
+        logger.info(f"  Copy id: {id(signal_copy)}")
+        logger.info(f"  Are same object? {signal is signal_copy}")
+        logger.info(f"  Have same values? {np.array_equal(signal, signal_copy)}")
+
+        # Create windows using the copy
+        full_dataset = SlidingWindowDataset(signal_copy, frame_labels,
                                             window_size=window_size,
                                             step_size=step_size)
 
-        # Create indices for train/val/test split
+        # Rest of the function remains the same...
         indices = np.arange(len(full_dataset))
-
-        # Split into train+val and test
         train_val_indices, test_indices = train_test_split(
             indices, test_size=test_size, random_state=random_state, stratify=None)
-
-        # Calculate actual validation size as a fraction of train+val
         actual_val_size = val_size / (1 - test_size)
-
-        # Split train+val into train and val
         train_indices, val_indices = train_test_split(
             train_val_indices, test_size=actual_val_size, random_state=random_state, stratify=None)
 
-        # Create subsets
         train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
         val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
         test_dataset = torch.utils.data.Subset(full_dataset, test_indices)
 
-        # Store datasets
         datasets[signal_name] = {
             'train': train_dataset,
             'val': val_dataset,
             'test': test_dataset
         }
 
-        # Log split sizes
         logger.info(
             f"{signal_name} split sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
     return datasets
 
+
+#
+# def create_datasets(calcium_signals: Dict[str, np.ndarray],
+#                     frame_labels: np.ndarray,
+#                     window_size: int = 15,
+#                     step_size: int = 1,
+#                     test_size: float = 0.15,
+#                     val_size: float = 0.15,
+#                     random_state: int = 42) -> Dict[str, Dict[str, SlidingWindowDataset]]:
+#     logger.info("Creating datasets from calcium signals")
+#     datasets = {}
+#
+#     for signal_name, signal in calcium_signals.items():
+#         if signal is None:
+#             logger.warning(f"Skipping {signal_name} because it is None")
+#             continue
+#
+#         logger.info(f"Processing {signal_name}")
+#
+#         print(f"\n🔍 DATASET CREATION CHECKPOINT:")
+#         print(f"Original {signal_name}: mean={signal.mean():.6f}, id={id(signal)}")
+#         print(f"Copy {signal_name}: mean={signal.mean():.6f}, id={id(signal)}")
+#         print(f"Are they the same object? {signal is signal}")
+#
+#         # Use the copy instead of the original
+#         full_dataset = SlidingWindowDataset(signal, frame_labels,
+#                                             window_size=window_size,
+#                                             step_size=step_size)
+#
+#         # Create indices for train/val/test split
+#         indices = np.arange(len(full_dataset))
+#
+#         # Split into train+val and test
+#         train_val_indices, test_indices = train_test_split(
+#             indices, test_size=test_size, random_state=random_state, stratify=None)
+#
+#         # Calculate actual validation size as a fraction of train+val
+#         actual_val_size = val_size / (1 - test_size)
+#
+#         # Split train+val into train and val
+#         train_indices, val_indices = train_test_split(
+#             train_val_indices, test_size=actual_val_size, random_state=random_state, stratify=None)
+#
+#         # Create subsets
+#         train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+#         val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+#         test_dataset = torch.utils.data.Subset(full_dataset, test_indices)
+#
+#         # Store datasets
+#         datasets[signal_name] = {
+#             'train': train_dataset,
+#             'val': val_dataset,
+#             'test': test_dataset
+#         }
+#
+#         # Log split sizes
+#         logger.info(
+#             f"{signal_name} split sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
+#
+#     return datasets
+#
 
 def create_data_loaders(datasets: Dict[str, Dict[str, torch.utils.data.Dataset]],
                         batch_size: int = 32,

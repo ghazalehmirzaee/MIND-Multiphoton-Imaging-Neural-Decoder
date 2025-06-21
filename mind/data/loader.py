@@ -1,5 +1,5 @@
 """
-Data loader for calcium imaging data with proper binary classification.
+Data loader for calcium imaging.
 """
 import os
 import numpy as np
@@ -12,46 +12,60 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 def load_calcium_signals(mat_file_path: str) -> Dict[str, np.ndarray]:
-    """
-    Load calcium imaging signals from MATLAB file.
-
-    Parameters
-    ----------
-    mat_file_path : str
-        Path to the MATLAB file containing calcium imaging data
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Dictionary containing the three types of signals:
-        - 'calcium_signal': Raw fluorescence data
-        - 'deltaf_signal': ΔF/F signal
-        - 'deconv_signal': Deconvolved signal
-    """
+    """Load calcium imaging signals from MATLAB file."""
     logger.info(f"Loading calcium signals from {mat_file_path}")
 
     try:
-        # First try using scipy.io.loadmat (for older MATLAB files)
+        # Load the data (existing code)
         try:
             data = scipy.io.loadmat(mat_file_path)
             calcium_signal = data.get('calciumsignal_wanted', None)
             deltaf_signal = data.get('deltaf_cells_not_excluded', None)
             deconv_signal = data.get('DeconvMat_wanted', None)
         except NotImplementedError:
-            # If scipy.io.loadmat fails, try hdf5storage
             data = hdf5storage.loadmat(mat_file_path)
             calcium_signal = data.get('calciumsignal_wanted', None)
             deltaf_signal = data.get('deltaf_cells_not_excluded', None)
             deconv_signal = data.get('DeconvMat_wanted', None)
 
-        # Check that we have at least one signal type
-        if calcium_signal is None and deltaf_signal is None and deconv_signal is None:
-            logger.error(f"No calcium signals found in {mat_file_path}")
-            raise ValueError(f"No calcium signals found in {mat_file_path}")
+        # DEBUGGING: Check if MATLAB file has duplicate references
+        logger.info("🔍 MATLAB FILE CONTENT CHECK:")
+        for key, value in data.items():
+            if not key.startswith('__') and isinstance(value, np.ndarray):
+                logger.info(f"  {key}: shape={value.shape}, id={id(value)}")
 
-        # Log shapes of signals
+        # DEBUGGING: Verify signals are actually different
+        signals = {
+            'calcium_signal': calcium_signal,
+            'deltaf_signal': deltaf_signal,
+            'deconv_signal': deconv_signal
+        }
+
+        logger.info("🔍 SIGNAL VERIFICATION:")
+        valid_signals = []
+        for name, signal in signals.items():
+            if signal is not None:
+                logger.info(f"  {name}: shape={signal.shape}, mean={np.mean(signal):.6f}, id={id(signal)}")
+                valid_signals.append((name, signal))
+            else:
+                logger.warning(f"  {name}: None")
+
+        # Check for identical arrays or references
+        for i in range(len(valid_signals)):
+            for j in range(i + 1, len(valid_signals)):
+                name1, sig1 = valid_signals[i]
+                name2, sig2 = valid_signals[j]
+
+                if sig1 is sig2:
+                    logger.error(f"🚨 SAME OBJECT: {name1} and {name2} reference the same array!")
+                elif np.array_equal(sig1, sig2):
+                    logger.error(f"🚨 IDENTICAL VALUES: {name1} and {name2} have identical values!")
+                else:
+                    diff_pct = np.mean(np.abs(sig1 - sig2)) / (np.mean(np.abs(sig1)) + 1e-10) * 100
+                    logger.info(f"✓ DIFFERENT: {name1} vs {name2}, difference: {diff_pct:.2f}%")
+
+        # Log shapes and basic stats (existing code)
         if calcium_signal is not None:
             logger.info(f"Raw calcium signal shape: {calcium_signal.shape}")
         if deltaf_signal is not None:
@@ -69,20 +83,9 @@ def load_calcium_signals(mat_file_path: str) -> Dict[str, np.ndarray]:
         logger.error(f"Error loading {mat_file_path}: {e}")
         raise
 
-
 def load_behavioral_data(xlsx_file_path: str) -> pd.DataFrame:
     """
     Load behavioral data from Excel file.
-
-    Parameters
-    ----------
-    xlsx_file_path : str
-        Path to the Excel file containing behavioral data
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing behavioral annotations
     """
     logger.info(f"Loading behavioral data from {xlsx_file_path}")
 

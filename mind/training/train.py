@@ -12,18 +12,6 @@ logger = logging.getLogger(__name__)
 def get_model_inputs_from_dataset(dataset: torch.utils.data.Dataset, indices=None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Extract features and labels from a PyTorch dataset.
-
-    Parameters
-    ----------
-    dataset : torch.utils.data.Dataset
-        PyTorch dataset
-    indices : List[int], optional
-        Indices to extract, by default None (all)
-
-    Returns
-    -------
-    Tuple[torch.Tensor, torch.Tensor]
-        Features and labels
     """
     if indices is None:
         indices = range(len(dataset))
@@ -51,18 +39,6 @@ def get_train_val_test_data(datasets: Dict[str, Dict[str, torch.utils.data.Datas
                             signal_type: str) -> Tuple:
     """
     Extract train, validation, and test data for a specific signal type.
-
-    Parameters
-    ----------
-    datasets : Dict[str, Dict[str, torch.utils.data.Dataset]]
-        Dictionary of datasets
-    signal_type : str
-        Signal type to extract ('calcium_signal', 'deltaf_signal', or 'deconv_signal')
-
-    Returns
-    -------
-    Tuple
-        (X_train, y_train, X_val, y_val, X_test, y_test)
     """
     logger.info(f"Extracting data for signal type: {signal_type}")
 

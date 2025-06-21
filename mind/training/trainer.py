@@ -22,10 +22,6 @@ logger = logging.getLogger(__name__)
 def set_seed(seed: int = 42):
     """
     Set all random seeds for reproducibility.
-
-    Think of this as ensuring that every "random" choice our algorithms make
-    will be the same across different runs, like using the same sequence of
-    dice rolls every time we play a game.
     """
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -36,56 +32,64 @@ def set_seed(seed: int = 42):
 
 def train_model(model_type, model_params, datasets, signal_type, window_size, n_neurons,
                 output_dir, device="cuda", optimize_hyperparams=False):
-    """
-    Train a model and return comprehensive results.
-
-    This function acts like a universal training conductor that can work with different
-    types of machine learning "orchestras" (models), each with their own specific
-    requirements and ways of interpreting the same musical score (data).
-
-    Parameters
-    ----------
-    model_type : str
-        Type of model to train ('random_forest', 'svm', 'mlp', 'fcnn', 'cnn')
-    model_params : dict
-        Parameters for the model (like tuning instructions for our orchestra)
-    datasets : dict
-        Dictionary containing train/val/test datasets for each signal type
-    signal_type : str
-        Type of signal to use ('calcium_signal', 'deltaf_signal', 'deconv_signal')
-    window_size : int
-        Size of the sliding window (temporal context for each prediction)
-    n_neurons : int
-        Number of neurons in the data (spatial dimension)
-    output_dir : str
-        Directory to save results
-    device : str, optional
-        Device to use for training ('cuda' or 'cpu'), by default "cuda"
-    optimize_hyperparams : bool, optional
-        Whether to optimize hyperparameters (handled by individual models), by default False
-
-    Returns
-    -------
-    dict
-        Dictionary containing training results and metrics
-    """
     logger.info(f"Training {model_type} on {signal_type}")
     set_seed(model_params.get('random_state', 42))
 
     # Extract data from the PyTorch datasets
-    # This is like gathering all our sheet music and organizing it for the orchestra
     train_dataset = datasets[signal_type]['train']
     val_dataset = datasets[signal_type]['val']
     test_dataset = datasets[signal_type]['test']
 
-    # Convert datasets to arrays that our models can understand
-    # PyTorch datasets store data as (features, labels) tuples, so we separate them
     X_train = torch.stack([x for x, _ in train_dataset])
     y_train = torch.tensor([y.item() for _, y in train_dataset])
     X_val = torch.stack([x for x, _ in val_dataset])
     y_val = torch.tensor([y.item() for _, y in val_dataset])
     X_test = torch.stack([x for x, _ in test_dataset])
     y_test = torch.tensor([y.item() for _, y in test_dataset])
+
+    # CRITICAL DIAGNOSTIC: Create unique fingerprints for the actual training data
+    print(f"\n🔍 TRAINING DATA IDENTITY CHECK:")
+    print(f"Signal type: {signal_type}")
+    print(f"X_train shape: {X_train.shape}")
+    print(f"X_train mean: {X_train.mean().item():.8f}")
+    print(f"X_train std: {X_train.std().item():.8f}")
+    print(f"X_train sum: {X_train.sum().item():.8f}")  # Additional fingerprint
+
+    # Create a more specific fingerprint using first few values
+    first_window_fingerprint = X_train[0, :3, :3].flatten()
+    print(f"First window fingerprint: {[f'{x:.6f}' for x in first_window_fingerprint]}")
+
+    # Store fingerprints globally to compare across runs
+    if not hasattr(train_model, 'data_fingerprints'):
+        train_model.data_fingerprints = {}
+
+    fingerprint_key = f"{model_type}_{signal_type}"
+    fingerprint_value = {
+        'mean': X_train.mean().item(),
+        'std': X_train.std().item(),
+        'sum': X_train.sum().item(),
+        'first_window': first_window_fingerprint.tolist()
+    }
+
+    train_model.data_fingerprints[fingerprint_key] = fingerprint_value
+
+    # Check for duplicate fingerprints across signal types
+    print(f"\n🔍 FINGERPRINT COMPARISON:")
+    current_signals = {}
+    for key, fp in train_model.data_fingerprints.items():
+        signal = key.split('_')[-1]  # Extract signal type
+        if signal in current_signals:
+            # Compare fingerprints
+            prev_fp = current_signals[signal]
+            mean_diff = abs(fp['mean'] - prev_fp['mean'])
+            sum_diff = abs(fp['sum'] - prev_fp['sum'])
+
+            if mean_diff < 1e-6 and sum_diff < 1e-6:
+                print(f"🚨 IDENTICAL DATA DETECTED!")
+                print(f"  {signal} has identical fingerprints across different models")
+                print(f"  This proves the same data array is being used!")
+        else:
+            current_signals[signal] = fp
 
     # Pass the optimize_hyperparams parameter to models that support it
     # This is like telling each orchestra section whether they should tune their instruments
@@ -239,4 +243,5 @@ def train_model(model_type, model_params, datasets, signal_type, window_size, n_
         logger.error(f"Failed to save results: {e}")
 
     return results
+
 
