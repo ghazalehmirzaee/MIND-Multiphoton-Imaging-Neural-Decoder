@@ -1,5 +1,6 @@
 """
-Fixed configuration with proper Random Forest class balancing and scientific colors.
+Fixed configuration with proper parameter separation for each model type.
+The key insight: remove all normalization to preserve natural signal characteristics.
 """
 import torch
 
@@ -17,7 +18,7 @@ DEFAULT_CONFIG = {
         "xlsx_file": "/home/ghazal/Documents/NS_Projects/NS_P2_050325/MIND-Multiphoton-Imaging-Neural-Decoder/data/raw/SFL13_5_8112021_003_new.xlsx"
     },
 
-    # Model parameters
+    # Model parameters - ALL WITHOUT NORMALIZATION
     "models": {
         "random_forest": {
             "n_estimators": 200,
@@ -25,21 +26,23 @@ DEFAULT_CONFIG = {
             "min_samples_split": 5,
             "min_samples_leaf": 2,
             "max_features": "sqrt",
-            "class_weight": "balanced_subsample",  # Better for imbalanced data
+            "class_weight": "balanced_subsample",
             "n_jobs": -1,
             "random_state": 42,
             "criterion": "gini",
             "bootstrap": True
         },
         "svm": {
+            # Core SVM parameters (no preprocessing parameters here)
             "C": 1.0,
             "kernel": "rbf",
             "gamma": "scale",
             "class_weight": "balanced",
             "probability": True,
             "random_state": 42,
-            "n_components": 0.95,
-            "use_pca": True
+            # PCA parameters handled separately in model
+            "use_pca": False,  # Disabled to preserve raw signal characteristics
+            "pca_variance": 0.95  # Only used if use_pca=True
         },
         "mlp": {
             "hidden_layer_sizes": (64, 128, 32),
@@ -48,18 +51,18 @@ DEFAULT_CONFIG = {
             "alpha": 0.0001,
             "batch_size": "auto",
             "learning_rate": "adaptive",
-            "learning_rate_init": 0.001,
-            "max_iter": 300,
+            "learning_rate_init": 0.0001,  # Reduced for better stability with raw signals
+            "max_iter": 500,  # Increased for better convergence
             "early_stopping": True,
             "validation_fraction": 0.1,
-            "n_iter_no_change": 15,
+            "n_iter_no_change": 20,  # Increased patience
             "random_state": 42
         },
         "fcnn": {
             "hidden_dims": [256, 128, 64],
             "output_dim": 2,
             "dropout_rate": 0.4,
-            "learning_rate": 0.001,
+            "learning_rate": 0.0001,  # Reduced for stability
             "weight_decay": 1e-5,
             "batch_size": 32,
             "num_epochs": 100,
@@ -67,11 +70,11 @@ DEFAULT_CONFIG = {
             "random_state": 42
         },
         "cnn": {
-            "n_filters": [32, 64, 128],  # Reduced for better performance
-            "kernel_size": 5,  # Larger kernel for temporal patterns
+            "n_filters": [32, 64, 128],
+            "kernel_size": 5,
             "output_dim": 2,
-            "dropout_rate": 0.2,  # Reduced dropout
-            "learning_rate": 0.0005,  # Lower learning rate
+            "dropout_rate": 0.2,
+            "learning_rate": 0.0005,
             "weight_decay": 1e-4,
             "batch_size": 32,
             "num_epochs": 50,
@@ -87,13 +90,6 @@ DEFAULT_CONFIG = {
         "output_dir": "outputs/results"
     },
 
-    # W&B parameters
-    "wandb": {
-        "use_wandb": True,
-        "project_name": "mind-calcium-imaging",
-        "entity": None
-    },
-
     # Visualization parameters with scientific colors
     "visualization": {
         "output_dir": "outputs/figures",
@@ -101,18 +97,8 @@ DEFAULT_CONFIG = {
         "format": "png",
         "signal_colors": {
             "calcium_signal": "#356d9e",  # Scientific blue
-            "deltaf_signal": "#4c8b64",  # Scientific green
-            "deconv_signal": "#a85858"  # Scientific red
-        },
-        "signal_gradients": {
-            "calcium_signal": ["#f0f4f9", "#c6dcef", "#7fb0d3", "#356d9e"],
-            "deltaf_signal": ["#f6f9f4", "#d6ead9", "#9dcaa7", "#4c8b64"],
-            "deconv_signal": ["#fdf3f3", "#f0d0d0", "#d49c9c", "#a85858"]
-        },
-        "signal_display_names": {
-            "calcium_signal": "Calcium",
-            "deltaf_signal": "ΔF/F",
-            "deconv_signal": "Deconvolved"
+            "deltaf_signal": "#4c8b64",   # Scientific green
+            "deconv_signal": "#a85858"    # Scientific red
         }
     },
 
