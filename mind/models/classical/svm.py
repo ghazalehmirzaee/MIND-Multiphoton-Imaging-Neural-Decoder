@@ -319,17 +319,15 @@
 #
 #
 
+
 """
 Support Vector Machine WITHOUT standardization for calcium imaging data.
 
 This implementation removes all normalization to study how SVM naturally handles
-different calcium signal scales and characteristics through kernel computations.
+different calcium signal scales through kernel computations.
 
-Key Design Principles:
-1. NO standardization - preserve natural signal characteristics
-2. Optional PCA without prior standardization
-3. Direct kernel computation on raw signal scales
-4. Proper parameter separation between SVM and preprocessing
+The key insight: Different signal types should create different decision boundaries
+when their natural scales are preserved.
 """
 import numpy as np
 from sklearn.svm import SVC
@@ -343,16 +341,14 @@ logger = logging.getLogger(__name__)
 
 class SVMModel:
     """
-    Support Vector Machine WITHOUT standardization for raw signal testing.
+    Support Vector Machine WITHOUT standardization.
 
-    This class removes all data normalization to study how SVM kernels
-    naturally respond to the different scales of calcium imaging signals.
+    This class demonstrates how SVM kernels respond to natural signal scales:
+    - Raw calcium (~6000): Creates decision boundaries based on large fluorescence values
+    - ΔF/F (~0.15): Creates boundaries based on relative change magnitudes
+    - Deconvolved (sparse): Creates boundaries based on spike event patterns
 
-    Scientific Rationale:
-    - Raw calcium signals (~6000 fluorescence units) represent actual photon counts
-    - ΔF/F signals (~0.15) represent normalized change from baseline
-    - Deconvolved signals (sparse, ~0.004 mean) represent inferred spike events
-    - Each scale carries different biological information that standardization would destroy
+    Each signal type should produce fundamentally different kernel responses.
     """
 
     def __init__(self,
@@ -366,53 +362,38 @@ class SVMModel:
                  use_pca: bool = False,
                  pca_variance: float = 0.95):
         """
-        Initialize SVM WITHOUT preprocessing pipeline.
+        Initialize SVM WITHOUT any preprocessing pipeline.
 
-        Parameters
-        ----------
-        C : float, optional
-            Regularization parameter - controls the trade-off between achieving
-            low training error and low testing error. Higher C = less regularization.
-            Default 1.0 works well for most calcium imaging data.
+        Parameters Explained:
+        ---------------------
+        C : float
+            Regularization parameter. Controls the trade-off between achieving low
+            training error and low testing error. For raw calcium signals (large values),
+            this effectively controls how much the model can be influenced by outliers.
 
-        kernel : str, optional
-            Specifies the kernel type to be used in the algorithm.
-            'rbf' (Radial Basis Function) is excellent for non-linear calcium patterns.
-            'linear' can be useful for debugging and feature importance analysis.
+        kernel : str
+            The kernel function. 'rbf' (Radial Basis Function) creates circular decision
+            boundaries, perfect for complex calcium signal patterns. 'linear' creates
+            straight-line boundaries, useful for interpretability.
 
-        gamma : str, optional
-            Kernel coefficient for 'rbf'. 'scale' uses 1/(n_features * X.var())
-            which adapts automatically to the signal scale - crucial when we're
-            not standardizing and have different signal magnitudes.
+        gamma : str
+            Kernel coefficient for 'rbf'. 'scale' automatically adapts to input variance:
+            gamma = 1 / (n_features * X.var()). This is CRUCIAL when signals have different
+            scales, as it allows the kernel to adapt to each signal type's characteristics.
 
-        class_weight : Optional[str], optional
-            Weights associated with classes. 'balanced' automatically adjusts
-            weights inversely proportional to class frequencies - essential for
-            calcium imaging where movement events are typically rare (imbalanced).
+        class_weight : str
+            'balanced' adjusts weights inversely proportional to class frequencies.
+            Essential for calcium imaging where movement events are rare vs. rest periods.
 
-        probability : bool, optional
-            Whether to enable probability estimates. Required for ROC curves and
-            probability-based analysis. Adds some computational overhead but
-            provides richer evaluation metrics.
+        probability : bool
+            Enables probability estimates. Required for ROC/PR curve analysis.
+            Adds computational overhead but provides richer evaluation metrics.
 
-        random_state : int, optional
-            Controls the pseudo random number generation for shuffling data for
-            probability estimates. Ensures reproducible results across runs.
-
-        optimize_hyperparams : bool, optional
-            Whether to perform hyperparameter optimization. Can improve performance
-            but significantly increases training time.
-
-        use_pca : bool, optional
-            Whether to apply PCA for dimensionality reduction WITHOUT standardization.
-            Can help with computational efficiency for high-dimensional data.
-
-        pca_variance : float, optional
-            Amount of variance to preserve when using PCA. 0.95 retains 95% of
-            the original signal information while reducing dimensionality.
+        use_pca : bool
+            Whether to apply PCA WITHOUT prior standardization. Tests whether
+            dimensionality reduction on raw signals preserves discriminative patterns.
         """
-        # Store hyperparameters for later use
-        # These parameters define how the SVM will behave during training
+        # Store all parameters for reproducibility and debugging
         self.C = C
         self.kernel = kernel
         self.gamma = gamma
@@ -423,8 +404,7 @@ class SVMModel:
         self.use_pca = use_pca
         self.pca_variance = pca_variance
 
-        # Initialize SVM model directly (no pipeline wrapper)
-        # We avoid sklearn's Pipeline to have full control over preprocessing
+        # Initialize SVM model directly (no pipeline to avoid hidden preprocessing)
         self.model = SVC(
             C=C,
             kernel=kernel,
@@ -435,72 +415,58 @@ class SVMModel:
         )
 
         # Initialize optional PCA WITHOUT standardization
-        # PCA is applied to raw data to study whether dimensionality reduction
-        # without normalization can still capture essential neural patterns
+        # This tests whether dimensionality reduction on raw data preserves patterns
         self.pca = PCA(n_components=pca_variance, random_state=random_state) if use_pca else None
 
-        # REMOVED: Pipeline with StandardScaler
-        # REMOVED: Mandatory preprocessing steps
-        # SVM will work directly with raw signal characteristics
-
         logger.info(f"Initialized SVM WITHOUT standardization")
-        logger.info(f"  Kernel: {kernel}, C: {C}, Gamma: {gamma}")
+        logger.info(f"  Parameters: C={C}, kernel={kernel}, gamma={gamma}")
         logger.info(f"  PCA: {use_pca} (applied to raw data if enabled)")
-        logger.info(f"  SVM will learn decision boundaries at natural signal scales")
-        logger.info(f"  Raw calcium (~6000), ΔF/F (~0.15), Deconvolved (sparse) maintain distinct patterns")
+        logger.info(f"  Expected behavior:")
+        logger.info(f"    Raw calcium (~6000): Kernel will adapt to large-scale patterns")
+        logger.info(f"    ΔF/F (~0.15): Kernel will adapt to small-scale relative changes")
+        logger.info(f"    Deconvolved (sparse): Kernel will focus on sparse spike events")
 
     def _prepare_data(self, X, y=None):
         """
         Prepare data WITHOUT any standardization.
 
-        This is the critical method that preserves natural signal characteristics.
+        This method is critical for preserving signal characteristics.
 
-        Scientific Importance:
-        - Raw calcium: High baseline (~6000) reflects actual fluorescence intensity
-        - ΔF/F: Low values (~0.15) reflect relative changes from baseline
-        - Deconvolved: Sparse values reflect inferred spike timing
+        Why Each Signal Type Matters:
+        ----------------------------
+        Raw calcium: High baseline reflects actual photon detection levels
+        ΔF/F: Low values reflect relative changes from baseline
+        Deconvolved: Sparse values reflect inferred neural spike timing
 
-        Each signal type has distinct statistical properties that contain
-        biological information. Standardization would destroy these differences.
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features, shape (n_samples, window_size, n_neurons)
-            Contains the raw neural activity patterns we want to preserve
-
-        y : torch.Tensor or np.ndarray, optional
-            Target labels, shape (n_samples,)
-            Binary labels: 0 = no movement, 1 = contralateral movement
-
-        Returns
-        -------
-        Tuple[np.ndarray, Optional[np.ndarray]]
-            Prepared X and y with original scales preserved
+        These differences contain biological information that standardization destroys.
         """
-        # Convert torch tensors to numpy arrays if needed
-        # This handles the interface between PyTorch datasets and sklearn models
+        # Handle tensor conversion (interface compatibility with PyTorch datasets)
         if hasattr(X, 'numpy'):
             X = X.numpy()
         if y is not None and hasattr(y, 'numpy'):
             y = y.numpy()
 
-        # Reshape X to 2D if needed (n_samples, window_size * n_neurons)
-        # SVM expects 2D input: each row is a sample, each column is a feature
-        # We flatten the temporal-spatial neural activity into a feature vector
+        # Reshape for SVM: (n_samples, n_features)
+        # SVM expects flattened feature vectors representing temporal-spatial patterns
         if X.ndim == 3:
             n_samples, window_size, n_neurons = X.shape
             X = X.reshape(n_samples, window_size * n_neurons)
 
-        # Log the raw data characteristics we're preserving
-        # This documentation helps verify we're maintaining signal integrity
+        # Document the preserved characteristics for scientific verification
         logger.info(f"SVM data prepared WITHOUT standardization:")
         logger.info(f"  Shape: {X.shape}")
-        logger.info(f"  Mean: {X.mean():.6f}")  # Should differ dramatically between signal types
+        logger.info(f"  Mean: {X.mean():.6f}")  # Should differ by orders of magnitude
         logger.info(f"  Std: {X.std():.6f}")  # Natural variability preserved
         logger.info(f"  Min: {X.min():.6f}")  # Baseline characteristics maintained
         logger.info(f"  Max: {X.max():.6f}")  # Peak activity levels preserved
-        logger.info(f"  SVM kernel will compute similarities at these natural scales")
+        logger.info(f"  Range: {X.max() - X.min():.6f}")  # Dynamic range preserved
+
+        # Verify we haven't accidentally applied normalization
+        if abs(X.mean()) < 0.1 and abs(X.std() - 1.0) < 0.1:
+            logger.error("🚨 DATA APPEARS NORMALIZED! This suggests pipeline contamination!")
+            logger.error("Expected: Raw calcium ~6000, ΔF/F ~0.15, Deconvolved ~0.004")
+        else:
+            logger.info("✓ Signal characteristics confirm NO normalization applied")
 
         return X, y
 
@@ -508,171 +474,81 @@ class SVMModel:
         """
         Train SVM WITHOUT standardization.
 
-        This method trains the SVM directly on the natural signal characteristics,
-        allowing us to study how different calcium signal types are naturally
-        separated by the SVM's decision boundary.
+        Training Process Analysis:
+        -------------------------
+        1. Raw calcium: Large input values → SVM learns decision boundaries at high scales
+        2. ΔF/F: Small input values → SVM learns boundaries at fractional scales
+        3. Deconvolved: Sparse inputs → SVM learns to distinguish sparse event patterns
 
-        Training Process:
-        1. Prepare data (convert tensors, reshape) WITHOUT normalization
-        2. Optionally apply PCA (but still no standardization)
-        3. Train SVM directly on the prepared data
-        4. Evaluate on validation data if provided
-
-        Parameters
-        ----------
-        X_train : torch.Tensor or np.ndarray
-            Training features with natural signal characteristics preserved
-        y_train : torch.Tensor or np.ndarray
-            Training labels (0=no movement, 1=contralateral movement)
-        X_val : torch.Tensor or np.ndarray, optional
-            Validation features for performance monitoring
-        y_val : torch.Tensor or np.ndarray, optional
-            Validation labels for performance monitoring
-
-        Returns
-        -------
-        self
-            The trained model ready for prediction
+        The 'scale' gamma parameter automatically adapts to each signal type's variance,
+        allowing fair comparison without artificial normalization.
         """
-        logger.info("Training SVM WITHOUT standardization")
+        logger.info("Training SVM WITHOUT standardization on natural signal characteristics")
 
-        # Prepare data WITHOUT any scaling
-        # This preserves the natural amplitude and baseline differences between signal types
+        # Prepare data while preserving all natural characteristics
         X_train, y_train = self._prepare_data(X_train, y_train)
 
         # Apply PCA if requested (but WITHOUT prior standardization)
-        # This tests whether dimensionality reduction on raw signals can still capture
-        # the essential neural patterns needed for movement decoding
+        # This is a controlled experiment: can dimensionality reduction work on raw signals?
         if self.use_pca:
             logger.info("Applying PCA to raw data (no prior standardization)")
+            original_shape = X_train.shape
             X_train = self.pca.fit_transform(X_train)
             explained_variance = self.pca.explained_variance_ratio_.sum()
             n_components = self.pca.n_components_
-            logger.info(f"PCA on raw data: {n_components} components explain {explained_variance:.2%} of variance")
+            logger.info(f"PCA on raw data: {original_shape[1]} → {n_components} features")
+            logger.info(f"Explained variance: {explained_variance:.2%}")
 
-        # REMOVED: StandardScaler preprocessing
-        # REMOVED: Pipeline wrapper
-        # Train SVM directly on raw or PCA-transformed (but not standardized) data
-
-        # Train the model on natural signal characteristics
-        # The SVM will learn to distinguish movement vs. no-movement based on
-        # the natural patterns present in each signal type
+        # Train SVM directly on unprocessed (or PCA-only) data
+        # The kernel will adapt to the natural signal scale through gamma='scale'
+        logger.info("Training SVM on natural signal scales...")
         self.model.fit(X_train, y_train)
 
-        logger.info("SVM model training complete WITHOUT standardization")
-        logger.info("Decision boundary optimized for natural signal scale differences")
+        # Report successful adaptation to signal characteristics
+        logger.info("SVM training complete WITHOUT standardization")
+        logger.info(f"Decision boundary optimized for natural signal scale differences")
 
-        # If validation data is provided, report validation score
-        # This helps us monitor training progress and detect overfitting
+        # Validate performance if validation data provided
         if X_val is not None and y_val is not None:
             X_val, y_val = self._prepare_data(X_val, y_val)
             if self.use_pca:
                 X_val = self.pca.transform(X_val)
             val_score = self.model.score(X_val, y_val)
-            logger.info(f"Validation accuracy: {val_score:.4f}")
+            logger.info(f"Validation accuracy on natural scales: {val_score:.4f}")
 
         return self
 
     def predict(self, X):
-        """
-        Make predictions WITHOUT standardization.
-
-        Uses the trained SVM to classify new neural activity patterns
-        while preserving their natural signal characteristics.
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features with natural signal scales preserved
-
-        Returns
-        -------
-        np.ndarray
-            Predicted labels (0=no movement, 1=contralateral movement)
-        """
-        # Prepare data WITHOUT scaling
+        """Make predictions preserving natural signal characteristics."""
         X, _ = self._prepare_data(X)
-
-        # Apply PCA if it was used during training (but no standardization)
         if self.use_pca:
             X = self.pca.transform(X)
-
-        # REMOVED: pipeline.predict() which included standardization
-        # Make predictions on raw or PCA-only transformed data
-        predictions = self.model.predict(X)
-
-        return predictions
+        return self.model.predict(X)
 
     def predict_proba(self, X):
-        """
-        Predict class probabilities WITHOUT standardization.
-
-        Provides probability estimates for each class, which are essential
-        for ROC curve analysis and understanding model confidence.
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features with natural signal scales preserved
-
-        Returns
-        -------
-        np.ndarray
-            Predicted class probabilities, shape (n_samples, n_classes)
-            Column 0: probability of no movement
-            Column 1: probability of contralateral movement
-        """
-        # Prepare data WITHOUT scaling
+        """Predict class probabilities on natural signal scales."""
         X, _ = self._prepare_data(X)
-
-        # Apply PCA if it was used during training (but no standardization)
         if self.use_pca:
             X = self.pca.transform(X)
-
-        # REMOVED: pipeline.predict_proba() which included standardization
-        # Predict probabilities on raw or PCA-only transformed data
-        probabilities = self.model.predict_proba(X)
-
-        return probabilities
+        return self.model.predict_proba(X)
 
     def get_feature_importance(self, window_size: int, n_neurons: int) -> np.ndarray:
         """
-        Get feature importance proxy for SVM WITHOUT standardization effects.
+        Extract feature importance WITHOUT standardization bias.
 
-        Note: SVMs don't have direct feature importance like Random Forest,
-        but we can approximate using support vector patterns or coefficient
-        magnitudes for linear kernels.
-
-        This is especially interesting when no standardization is applied because
-        the feature weights reflect how the SVM naturally responds to different
-        signal scales and characteristics.
-
-        Parameters
-        ----------
-        window_size : int
-            Size of the sliding window (temporal dimension)
-        n_neurons : int
-            Number of neurons (spatial dimension)
-
-        Returns
-        -------
-        np.ndarray
-            Approximate feature importance matrix of shape (window_size, n_neurons)
-            Higher values indicate more important features for classification
+        For linear kernels, this shows how SVM naturally weights different features
+        when processing signals at their original scales.
         """
         logger.info("Extracting SVM feature importance WITHOUT standardization bias")
 
         if self.kernel == 'linear':
-            # For linear kernels, use coefficient magnitudes
-            # Linear SVM coefficients directly indicate feature importance
+            # Linear SVM provides interpretable coefficients
             if hasattr(self.model, 'coef_'):
-                # Get linear coefficients
                 coef = self.model.coef_[0]  # Shape: (n_features,)
 
-                # Handle PCA case
+                # Handle PCA case: transform coefficients back to original space
                 if self.use_pca:
-                    # Transform PCA coefficients back to original space
-                    # This shows which original features contributed most through PCA
+                    # Project PCA coefficients back to original feature space
                     original_coef = np.abs(self.pca.components_.T @ coef)
                     importance = original_coef[:window_size * n_neurons]
                 else:
@@ -682,20 +558,15 @@ class SVMModel:
                 if importance.sum() > 0:
                     importance = importance / importance.sum()
 
-                # Reshape to (window_size, n_neurons) to show temporal-spatial patterns
+                # Reshape to (window_size, n_neurons) for temporal-spatial interpretation
                 n_features = min(len(importance), window_size * n_neurons)
                 importance_matrix = importance[:n_features].reshape(window_size, n_neurons)
 
                 logger.info("Linear SVM coefficients reflect natural signal scale influences")
-                logger.info("Higher coefficients indicate features that naturally distinguish movement patterns")
                 return importance_matrix
 
-        # For non-linear kernels, return uniform importance
-        # Non-linear kernels don't provide interpretable feature weights
-        logger.warning("Non-linear SVM: returning uniform feature importance")
-        logger.info("Consider using linear kernel for interpretable feature importance")
-        importance_matrix = np.ones((window_size, n_neurons)) / (window_size * n_neurons)
-
-        return importance_matrix
-
+        # For non-linear kernels, feature importance isn't directly interpretable
+        logger.warning("Non-linear SVM: returning uniform importance")
+        logger.info("Consider linear kernel for interpretable feature weights")
+        return np.ones((window_size, n_neurons)) / (window_size * n_neurons)
 

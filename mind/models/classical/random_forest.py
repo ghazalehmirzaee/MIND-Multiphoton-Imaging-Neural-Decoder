@@ -310,23 +310,18 @@
 #             return importance_matrix
 #
 
+
 """
 Random Forest model WITHOUT any preprocessing to preserve signal characteristics.
 
-This implementation is designed to work directly with the natural scales of different
-calcium imaging signals to reveal how tree-based algorithms handle scale differences.
-
-Scientific Rationale:
-- Random Forest uses decision trees that split on actual feature values
-- Tree splits should naturally adapt to different signal scales
-- Raw calcium (~6000), ΔF/F (~0.15), and deconvolved (sparse) signals should produce
-  different tree structures and decision boundaries
-- NO preprocessing allows us to study the natural discriminative power of each signal type
+FIXED: Completely removes all preprocessing and adds comprehensive data tracking
+to ensure different signals produce different results.
 """
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 import logging
 from typing import Dict, Any, Optional, Tuple, List, Union
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -335,14 +330,9 @@ class RandomForestModel:
     """
     Random Forest model WITHOUT any preprocessing for raw signal testing.
 
-    This class completely removes data normalization to study how tree-based algorithms
-    naturally handle the different scales and characteristics of calcium signals.
-
-    Key Design Philosophy:
-    1. ZERO preprocessing - preserve every aspect of natural signal characteristics
-    2. Let tree splits work directly with actual fluorescence values
-    3. Study how different signal types create different decision tree structures
-    4. Verify that scale differences alone can provide discriminative power
+    FIXED: This class now includes comprehensive data tracking to ensure
+    that different signal types maintain their unique characteristics
+    throughout the entire training process.
     """
 
     def __init__(self,
@@ -355,58 +345,14 @@ class RandomForestModel:
                  n_jobs: int = -1,
                  random_state: int = 42,
                  criterion: str = 'gini',
-                 bootstrap: bool = True):
+                 bootstrap: bool = True,
+                 **kwargs):  # FIXED: Accept extra parameters and ignore them
         """
         Initialize Random Forest WITHOUT any preprocessing.
 
-        Parameters
-        ----------
-        n_estimators : int, optional
-            Number of trees in the forest. 200 provides good balance between
-            performance and computational cost for calcium imaging data.
-            More trees = more stable predictions but longer training time.
-
-        max_depth : Optional[int], optional
-            Maximum depth of each tree. 15 prevents overfitting while allowing
-            sufficient complexity to capture temporal-spatial neural patterns.
-            None would allow unlimited depth (risk of overfitting).
-
-        min_samples_split : int, optional
-            Minimum samples required to split an internal node. 5 prevents
-            the tree from making splits based on very few samples (reduces noise).
-            This is crucial for calcium imaging where some patterns might be rare.
-
-        min_samples_leaf : int, optional
-            Minimum samples required in a leaf node. 2 ensures each decision
-            has statistical support while maintaining sufficient granularity.
-
-        max_features : str, optional
-            Number of features to consider for the best split. 'sqrt' means
-            sqrt(total_features) are randomly selected for each split.
-            This adds randomness and prevents overfitting to dominant features.
-
-        class_weight : str, optional
-            'balanced_subsample' automatically balances class weights for each
-            tree using bootstrap sample composition. Essential for calcium imaging
-            where movement events are typically much rarer than no-movement periods.
-
-        n_jobs : int, optional
-            Number of parallel jobs. -1 uses all available CPU cores for faster
-            training on the typically high-dimensional calcium imaging data.
-
-        random_state : int, optional
-            Controls randomness for reproducible results across different runs.
-            Essential for scientific experiments requiring reproducibility.
-
-        criterion : str, optional
-            Function to measure split quality. 'gini' measures impurity and works
-            well for binary classification of movement vs. no-movement.
-
-        bootstrap : bool, optional
-            Whether to use bootstrap samples for training each tree. True enables
-            out-of-bag scoring and adds robustness through sample diversity.
+        FIXED: Now includes comprehensive parameter handling and data integrity checking.
         """
-        # Store all parameters for potential debugging and hyperparameter analysis
+        # Store all parameters
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -418,10 +364,12 @@ class RandomForestModel:
         self.criterion = criterion
         self.bootstrap = bootstrap
 
+        # FIXED: Log any extra parameters that were ignored
+        if kwargs:
+            logger.info(f"Random Forest ignoring extra parameters: {list(kwargs.keys())}")
+
         # CRITICAL: NO preprocessing components initialized
-        # REMOVED: StandardScaler - would destroy natural signal characteristics
-        # REMOVED: PCA - would create linear combinations that obscure signal differences
-        # REMOVED: Any normalization - would make different signals artificially similar
+        # This ensures absolutely no data modification occurs
 
         # Initialize Random Forest with parameters optimized for calcium imaging
         self.model = RandomForestClassifier(
@@ -435,77 +383,81 @@ class RandomForestModel:
             random_state=random_state,
             criterion=criterion,
             bootstrap=bootstrap,
-            oob_score=bootstrap  # Enable out-of-bag scoring for performance monitoring
+            oob_score=bootstrap
         )
 
+        # FIXED: Track data fingerprints to detect contamination
+        self.data_fingerprints = {}
+
         logger.info(f"Initialized Random Forest WITHOUT preprocessing with {n_estimators} trees")
-        logger.info(f"  Tree splits will work directly on natural signal values:")
-        logger.info(f"  - Raw calcium: ~6000 fluorescence units (actual photon counts)")
-        logger.info(f"  - ΔF/F: ~0.15 normalized units (relative change from baseline)")
-        logger.info(f"  - Deconvolved: sparse values (inferred spike events)")
-        logger.info(f"  Each signal type should create distinct tree structures!")
+        logger.info(f"  All preprocessing components DISABLED")
+        logger.info(f"  Data fingerprint tracking ENABLED")
+
+    def _create_data_fingerprint(self, X, label=""):
+        """
+        Create a unique fingerprint for the data to track contamination.
+
+        FIXED: This method helps us verify that different signal types
+        maintain their unique characteristics.
+        """
+        fingerprint = {
+            'label': label,
+            'shape': X.shape,
+            'mean': float(X.mean()),
+            'std': float(X.std()),
+            'min': float(X.min()),
+            'max': float(X.max()),
+            'sum': float(X.sum()),
+            'hash': hashlib.md5(X.tobytes()).hexdigest()[:16],
+            'first_10_values': X.flatten()[:10].tolist(),
+            'memory_id': id(X)
+        }
+        return fingerprint
 
     def _prepare_data(self, X, y=None):
         """
         Prepare data WITHOUT any normalization or scaling.
 
-        This is the most critical method in the entire pipeline. It must preserve
-        every aspect of the original signal characteristics to enable proper
-        comparison between signal types.
-
-        The Scientific Importance:
-        Random Forest decision trees make splits based on actual feature values:
-        - Raw calcium: Trees might split on "if fluorescence > 6500 then movement"
-        - ΔF/F: Trees might split on "if change > 0.3 then movement"
-        - Deconvolved: Trees might split on "if spike_probability > 0.1 then movement"
-
-        These are fundamentally different decision rules that should produce
-        different performance characteristics!
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features preserving natural signal characteristics
-        y : torch.Tensor or np.ndarray, optional
-            Target labels (0=no movement, 1=contralateral movement)
-
-        Returns
-        -------
-        Tuple[np.ndarray, np.ndarray or None]
-            Prepared data with original scales completely preserved
+        FIXED: Now includes comprehensive fingerprinting to track data integrity.
         """
-        # Convert torch tensors to numpy if needed (interface compatibility)
+        # Convert torch tensors to numpy if needed
         if hasattr(X, 'numpy'):
             X = X.numpy()
         if y is not None and hasattr(y, 'numpy'):
             y = y.numpy()
 
+        # Create fingerprint BEFORE any processing
+        original_fingerprint = self._create_data_fingerprint(X, "input")
+
         # Reshape for Random Forest: (n_samples, n_features)
-        # Random Forest expects 2D input where each row is a sample
-        # We flatten temporal-spatial neural activity into feature vectors
+        original_shape = X.shape
         if X.ndim == 3:
             n_samples, window_size, n_neurons = X.shape
             X = X.reshape(n_samples, window_size * n_neurons)
 
-        # CRITICAL VERIFICATION: Log data characteristics to verify signal integrity
-        # These statistics should be dramatically different for each signal type
-        logger.info(f"Random Forest data prepared WITHOUT any preprocessing:")
-        logger.info(f"  Shape: {X.shape}")
-        logger.info(f"  Mean: {X.mean():.8f}")  # Should differ by orders of magnitude
-        logger.info(f"  Std: {X.std():.8f}")  # Natural variability preserved
-        logger.info(f"  Min: {X.min():.8f}")  # Baseline characteristics maintained
-        logger.info(f"  Max: {X.max():.8f}")  # Peak activity levels preserved
-        logger.info(f"  Range: {X.max() - X.min():.8f}")  # Dynamic range preserved
+        # Create fingerprint AFTER reshaping
+        reshaped_fingerprint = self._create_data_fingerprint(X, "reshaped")
 
-        # Additional verification: check for any signs of normalization artifacts
-        # Normalized data would have mean ≈ 0, std ≈ 1
-        if abs(X.mean()) < 0.1 and abs(X.std() - 1.0) < 0.1:
-            logger.error("⚠️  DATA APPEARS TO BE NORMALIZED! This suggests preprocessing error!")
-            logger.error("   Raw calcium should have mean ~6000, ΔF/F ~0.15, deconvolved ~0.004")
-        else:
-            logger.info("✓ Data characteristics confirm NO normalization applied")
+        # FIXED: Comprehensive verification that NO preprocessing occurred
+        logger.info(f"Random Forest data preparation WITHOUT preprocessing:")
+        logger.info(f"  Shape transformation: {original_shape} -> {X.shape}")
+        logger.info(f"  Mean: {reshaped_fingerprint['mean']:.8f}")
+        logger.info(f"  Std: {reshaped_fingerprint['std']:.8f}")
+        logger.info(f"  Range: [{reshaped_fingerprint['min']:.6f}, {reshaped_fingerprint['max']:.6f}]")
+        logger.info(f"  Data hash: {reshaped_fingerprint['hash']}")
 
-        logger.info(f"  Tree splits will use these exact values for decision boundaries")
+        # CRITICAL: Check for signs of normalization
+        if abs(reshaped_fingerprint['mean']) < 0.1 and abs(reshaped_fingerprint['std'] - 1.0) < 0.1:
+            logger.error("🚨 DATA APPEARS NORMALIZED! This indicates hidden preprocessing!")
+            logger.error(f"   Mean: {reshaped_fingerprint['mean']:.8f}, Std: {reshaped_fingerprint['std']:.8f}")
+            raise ValueError("Data has been unexpectedly normalized")
+
+        # Store fingerprint for contamination detection
+        timestamp = len(self.data_fingerprints)
+        self.data_fingerprints[f"prepare_{timestamp}"] = reshaped_fingerprint
+
+        logger.info(f"  ✓ Data maintains original scale characteristics")
+        logger.info(f"  ✓ No hidden preprocessing detected")
 
         return X, y
 
@@ -513,197 +465,124 @@ class RandomForestModel:
         """
         Train Random Forest WITHOUT any preprocessing.
 
-        This method trains the Random Forest directly on natural signal characteristics,
-        allowing tree splits to discover the inherent discriminative patterns in each
-        signal type without any artificial modifications.
-
-        Training Process Analysis:
-        1. Raw calcium: High-amplitude signals (thousands of fluorescence units)
-           Trees will split on large thresholds reflecting actual photon count differences
-        2. ΔF/F: Low-amplitude signals (fractions)
-           Trees will split on small thresholds reflecting relative fluorescence changes
-        3. Deconvolved: Sparse signals (mostly zeros with occasional spikes)
-           Trees will split primarily on presence/absence of inferred spike events
-
-        These fundamentally different splitting strategies should produce different
-        tree structures and therefore different performance characteristics.
-
-        Parameters
-        ----------
-        X_train : torch.Tensor or np.ndarray
-            Training features with natural signal characteristics preserved
-        y_train : torch.Tensor or np.ndarray
-            Training labels (0=no movement, 1=contralateral movement)
-        X_val : torch.Tensor or np.ndarray, optional
-            Validation features for performance monitoring
-        y_val : torch.Tensor or np.ndarray, optional
-            Validation labels for performance monitoring
-
-        Returns
-        -------
-        self
-            Trained model ready for prediction and analysis
+        FIXED: Enhanced monitoring to ensure different signals produce different trees.
         """
-        logger.info("Training Random Forest WITHOUT any preprocessing")
+        logger.info("Training Random Forest WITHOUT preprocessing")
 
         # Prepare data WITHOUT any scaling or normalization
-        # This is where we preserve the natural signal characteristics
         X_train, y_train = self._prepare_data(X_train, y_train)
 
-        # VERIFICATION: Double-check that different signal types have different characteristics
-        # This verification helps catch data pipeline errors early
-        signal_fingerprint = {
-            'mean': X_train.mean(),
-            'std': X_train.std(),
-            'min': X_train.min(),
-            'max': X_train.max(),
-            'n_zeros': np.sum(X_train == 0),  # Important for deconvolved signals
-            'n_samples': X_train.shape[0],
-            'n_features': X_train.shape[1]
-        }
+        # FIXED: Store training data fingerprint for comparison across runs
+        train_fingerprint = self._create_data_fingerprint(X_train, "training")
 
-        logger.info("Signal fingerprint for Random Forest training:")
-        for key, value in signal_fingerprint.items():
-            logger.info(f"  {key}: {value}")
+        # Check if we've seen this exact data before (contamination detection)
+        for stored_name, stored_fp in self.data_fingerprints.items():
+            if stored_fp['hash'] == train_fingerprint['hash'] and stored_name.startswith("training_"):
+                logger.warning(f"🚨 IDENTICAL TRAINING DATA detected!")
+                logger.warning(f"   Current data matches previously seen: {stored_name}")
+                logger.warning(f"   This may explain identical results across signal types")
 
-        # REMOVED: All preprocessing steps that could homogenize the signals:
-        # - No StandardScaler.fit_transform()
-        # - No PCA transformation
-        # - No normalization of any kind
-        # - No feature scaling
+        # Store this training fingerprint
+        self.data_fingerprints[f"training_{train_fingerprint['hash'][:8]}"] = train_fingerprint
 
+        logger.info(f"Training Random Forest on data with characteristics:")
+        logger.info(f"  Mean: {train_fingerprint['mean']:.8f}")
+        logger.info(f"  Std: {train_fingerprint['std']:.8f}")
+        logger.info(f"  Unique hash: {train_fingerprint['hash']}")
+
+        # REMOVED: All preprocessing steps
         # Train Random Forest directly on raw signal characteristics
-        # Each tree will learn to split on the natural feature values
-        self.model.fit(X_train, y_train)
+        try:
+            self.model.fit(X_train, y_train)
+            logger.info("Random Forest training completed successfully")
+        except Exception as e:
+            logger.error(f"Random Forest training failed: {e}")
+            raise
 
-        # Log out-of-bag score if available (built-in cross-validation measure)
+        # Log out-of-bag score if available
         if hasattr(self.model, 'oob_score_'):
             logger.info(f"Out-of-bag score: {self.model.oob_score_:.4f}")
-            logger.info("OOB score reflects performance on natural signal characteristics")
+
+        # FIXED: Analyze what the trees actually learned
+        self._analyze_tree_splits(X_train)
 
         # Validate if data provided
         if X_val is not None and y_val is not None:
             X_val, y_val = self._prepare_data(X_val, y_val)
-            # No transformation applied to validation data either
             val_score = self.model.score(X_val, y_val)
             logger.info(f"Validation accuracy: {val_score:.4f}")
 
-        logger.info("Random Forest training complete WITHOUT preprocessing")
-        logger.info("Tree structure optimized for natural signal characteristics")
-
-        # Additional diagnostic: Check if trees actually used different thresholds
-        # This helps verify that different signal types create different tree structures
-        if hasattr(self.model, 'estimators_') and len(self.model.estimators_) > 0:
-            first_tree = self.model.estimators_[0].tree_
-            if hasattr(first_tree, 'threshold'):
-                thresholds = first_tree.threshold[first_tree.threshold != -2]  # -2 indicates leaf nodes
-                if len(thresholds) > 0:
-                    logger.info(f"Sample tree thresholds - Min: {thresholds.min():.6f}, Max: {thresholds.max():.6f}")
-                    logger.info("These thresholds should reflect natural signal scale differences")
-
         return self
 
+    def _analyze_tree_splits(self, X_train):
+        """
+        FIXED: Analyze the decision tree splits to verify they're using original scales.
+        """
+        if hasattr(self.model, 'estimators_') and len(self.model.estimators_) > 0:
+            # Analyze first few trees
+            split_values = []
+            for i, tree_estimator in enumerate(self.model.estimators_[:3]):
+                tree = tree_estimator.tree_
+                if hasattr(tree, 'threshold'):
+                    thresholds = tree.threshold[tree.threshold != -2]  # -2 indicates leaf nodes
+                    if len(thresholds) > 0:
+                        split_values.extend(thresholds)
+                        logger.info(f"Tree {i} split range: [{thresholds.min():.6f}, {thresholds.max():.6f}]")
+
+            if split_values:
+                all_splits = np.array(split_values)
+                logger.info(f"Overall split analysis:")
+                logger.info(f"  Split value range: [{all_splits.min():.6f}, {all_splits.max():.6f}]")
+                logger.info(f"  Split value mean: {all_splits.mean():.6f}")
+                logger.info(f"  These splits should reflect natural signal scale differences")
+
+                # FIXED: Verify splits are appropriate for the data scale
+                data_range = X_train.max() - X_train.min()
+                split_range = all_splits.max() - all_splits.min()
+                if split_range > data_range * 0.1:  # Splits span reasonable portion of data range
+                    logger.info(f"  ✓ Splits span appropriate range relative to data")
+                else:
+                    logger.warning(f"  ⚠️ Splits may not be utilizing full data range effectively")
+
     def predict(self, X):
-        """
-        Make predictions WITHOUT preprocessing.
-
-        Uses trained Random Forest to classify neural activity patterns while
-        preserving their natural signal characteristics.
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features with natural signal scales preserved
-
-        Returns
-        -------
-        np.ndarray
-            Predicted labels (0=no movement, 1=contralateral movement)
-        """
-        # Prepare data WITHOUT any scaling
+        """Make predictions WITHOUT preprocessing."""
         X, _ = self._prepare_data(X)
-
-        # REMOVED: Any preprocessing transformations
-        # Make predictions on completely unprocessed data
         return self.model.predict(X)
 
     def predict_proba(self, X):
-        """
-        Predict class probabilities WITHOUT preprocessing.
-
-        Provides probability estimates based on the natural signal characteristics
-        learned during training.
-
-        Parameters
-        ----------
-        X : torch.Tensor or np.ndarray
-            Input features with natural signal scales preserved
-
-        Returns
-        -------
-        np.ndarray
-            Predicted class probabilities, shape (n_samples, n_classes)
-        """
-        # Prepare data WITHOUT any scaling
+        """Predict class probabilities WITHOUT preprocessing."""
         X, _ = self._prepare_data(X)
-
-        # REMOVED: Any preprocessing transformations
-        # Predict probabilities on completely unprocessed data
         return self.model.predict_proba(X)
 
     def get_feature_importance(self, window_size: int, n_neurons: int) -> np.ndarray:
         """
         Get feature importance WITHOUT preprocessing effects.
 
-        This reveals how Random Forest naturally weights different features when
-        working with signals at their original scales. The importance values
-        reflect the discriminative power of each feature in its natural units.
-
-        Scientific Insight:
-        - For raw calcium: Important features will be those fluorescence values
-          that best distinguish movement vs. no-movement states
-        - For ΔF/F: Important features will be relative changes that best predict behavior
-        - For deconvolved: Important features will be spike patterns most predictive of movement
-
-        These should be fundamentally different patterns!
-
-        Parameters
-        ----------
-        window_size : int
-            Size of the sliding window (temporal dimension)
-        n_neurons : int
-            Number of neurons (spatial dimension)
-
-        Returns
-        -------
-        np.ndarray
-            Feature importance matrix of shape (window_size, n_neurons)
-            Values reflect natural discriminative power without preprocessing bias
+        FIXED: Enhanced analysis of importance patterns.
         """
         if not hasattr(self.model, 'feature_importances_'):
             raise ValueError("Model must be trained before extracting feature importance")
 
-        # Get feature importances directly from Random Forest
-        # These values reflect how much each feature (at its natural scale)
-        # contributed to reducing impurity across all trees
         importances = self.model.feature_importances_
-
-        # Direct mapping since no PCA or other transformations were applied
-        # Every feature corresponds directly to a (time_step, neuron) combination
         n_features = min(len(importances), window_size * n_neurons)
         importance_matrix = importances[:n_features].reshape(window_size, n_neurons)
 
         logger.info(f"Random Forest feature importance extracted WITHOUT preprocessing")
-        logger.info(f"  Importances reflect natural signal scale differences:")
-        logger.info(f"  - High importance = features that naturally distinguish movement patterns")
-        logger.info(f"  - Values are based on original signal characteristics, not normalized features")
-        logger.info(f"  - Different signal types should show different importance patterns")
-
-        # Additional diagnostic information
         logger.info(f"  Importance statistics:")
         logger.info(f"    Mean: {importance_matrix.mean():.8f}")
         logger.info(f"    Max: {importance_matrix.max():.8f}")
         logger.info(f"    Non-zero features: {np.sum(importance_matrix > 0)}/{importance_matrix.size}")
 
+        # FIXED: Verify importance pattern makes sense
+        if importance_matrix.max() < 0.01:
+            logger.warning("⚠️ Very low maximum importance detected")
+            logger.warning("   This may indicate the model didn't find strong patterns")
+
         return importance_matrix
+
+    def get_data_fingerprints(self):
+        """
+        FIXED: Return all data fingerprints for contamination analysis.
+        """
+        return self.data_fingerprints
 
